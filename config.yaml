@@ -1,0 +1,19 @@
+embedding:
+  model: BAAI/bge-m3
+  device: cpu
+
+llm:
+  model: llama3.2
+  endpoint: http://localhost:11434/api/chat
+  temperature: 0.1
+  max_tokens: 1024
+
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.3
+  rerank_method: reciprocal_rank_fusion
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  vector_db_dir: data/vector_db
