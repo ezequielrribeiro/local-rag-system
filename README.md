@@ -51,7 +51,7 @@ python main.py chat
 Comandos disponíveis no REPL:
 
 | Comando | Descrição |
-|---|---|---|
+|---|---|
 | `/help` | Lista comandos |
 | `/clear` | Limpa a tela |
 | `/model` | Mostra modelo atual |
