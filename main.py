@@ -7,9 +7,10 @@ import yaml
 from src.generation.llm_client import LLMClient
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
 logger = logging.getLogger("main")
 
 
@@ -129,6 +130,9 @@ def main() -> None:
     )
     query_parser.set_defaults(func="query")
 
+    chat_parser = subparsers.add_parser("chat", help="Start interactive REPL")
+    chat_parser.set_defaults(func="chat")
+
     args = parser.parse_args()
     config = load_config(args.config)
 
@@ -136,6 +140,10 @@ def main() -> None:
         cmd_ingest(config)
     elif args.func == "query":
         cmd_query(config, args.query_text, args.doc_type)
+    elif args.func == "chat":
+        from src.cli.repl import REPL
+        repl = REPL(config)
+        repl.run()
 
 
 if __name__ == "__main__":

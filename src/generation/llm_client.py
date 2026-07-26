@@ -1,3 +1,4 @@
+import json
 import logging
 
 import requests
@@ -23,15 +24,7 @@ class LLMClient:
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    def generate(
-        self,
-        query: str,
-        context_chunks: list[DocumentChunk],
-        doc_type: str = "tech",
-    ) -> str:
-        if not context_chunks:
-            return NO_CONTEXT_MESSAGE
-
+    def _build_payload(self, query, context_chunks, doc_type, stream):
         context_parts = []
         for i, chunk in enumerate(context_chunks, start=1):
             source = chunk.metadata.source
@@ -47,7 +40,7 @@ class LLMClient:
         )
         system_prompt = get_system_prompt(doc_type)
 
-        payload = {
+        return {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -57,8 +50,19 @@ class LLMClient:
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
             },
-            "stream": False,
+            "stream": stream,
         }
+
+    def generate(
+        self,
+        query: str,
+        context_chunks: list[DocumentChunk],
+        doc_type: str = "tech",
+    ) -> str:
+        if not context_chunks:
+            return NO_CONTEXT_MESSAGE
+
+        payload = self._build_payload(query, context_chunks, doc_type, stream=False)
 
         try:
             resp = requests.post(self.endpoint, json=payload, timeout=60)
@@ -74,3 +78,36 @@ class LLMClient:
         except Exception:
             logger.exception("Ollama request failed")
             return NO_CONTEXT_MESSAGE
+
+    def generate_stream(
+        self,
+        query: str,
+        context_chunks: list[DocumentChunk],
+        doc_type: str = "tech",
+    ):
+        if not context_chunks:
+            yield NO_CONTEXT_MESSAGE
+            return
+
+        payload = self._build_payload(query, context_chunks, doc_type, stream=True)
+
+        try:
+            resp = requests.post(
+                self.endpoint, json=payload, stream=True, timeout=120
+            )
+            resp.raise_for_status()
+            for line in resp.iter_lines(decode_unicode=True):
+                if not line:
+                    continue
+                data = json.loads(line)
+                token = data.get("message", {}).get("content", "")
+                if token:
+                    yield token
+        except requests.exceptions.ConnectionError:
+            logger.error(
+                "Cannot connect to Ollama at %s. Is it running?", self.endpoint
+            )
+            yield NO_CONTEXT_MESSAGE
+        except Exception:
+            logger.exception("Ollama stream request failed")
+            yield NO_CONTEXT_MESSAGE
