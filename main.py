@@ -42,7 +42,10 @@ def cmd_ingest(config: dict) -> None:
     logger.info("Ingestion and indexing complete.")
 
 
-def cmd_query(config: dict, query: str, doc_type_override: str | None) -> None:
+def cmd_query(
+    config: dict, query: str, doc_type_override: str | None, use_clipboard: bool = False
+) -> None:
+    from src.clipboard.loader import make_clipboard_chunk, read_clipboard
     from src.retrieval.router import route_query
     from src.retrieval.vector_store import HybridVectorStore
 
@@ -86,6 +89,12 @@ def cmd_query(config: dict, query: str, doc_type_override: str | None) -> None:
         or "tech"
     )
 
+    if use_clipboard:
+        text = read_clipboard()
+        if text:
+            clip = make_clipboard_chunk(text, doc_type)
+            results.insert(0, clip)
+
     client = LLMClient(
         endpoint=llm_cfg["endpoint"],
         model=llm_cfg["model"],
@@ -128,6 +137,11 @@ def main() -> None:
         choices=["user", "tech", "support"],
         help="Override document type filter",
     )
+    query_parser.add_argument(
+        "--clipboard",
+        action="store_true",
+        help="Read clipboard content as additional context",
+    )
     query_parser.set_defaults(func="query")
 
     chat_parser = subparsers.add_parser("chat", help="Start interactive REPL")
@@ -139,7 +153,7 @@ def main() -> None:
     if args.func == "ingest":
         cmd_ingest(config)
     elif args.func == "query":
-        cmd_query(config, args.query_text, args.doc_type)
+        cmd_query(config, args.query_text, args.doc_type, args.clipboard)
     elif args.func == "chat":
         from src.cli.repl import REPL
         repl = REPL(config)

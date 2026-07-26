@@ -9,6 +9,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
+from src.clipboard.loader import make_clipboard_chunk, read_clipboard
 from src.generation.llm_client import LLMClient, NO_CONTEXT_MESSAGE
 from src.retrieval.router import route_query
 from src.retrieval.vector_store import HybridVectorStore
@@ -49,6 +50,7 @@ class REPL:
         self.session = PromptSession(
             history=FileHistory(HISTORY_PATH),
         )
+        self._clipboard_text: str | None = None
 
     def run(self):
         self._show_banner()
@@ -95,6 +97,8 @@ class REPL:
             self._cmd_model(arg)
         elif command == "/doc-type":
             self._cmd_doc_type(arg)
+        elif command == "/clip":
+            self._cmd_clip(arg)
         elif command in ("/quit", "/exit"):
             self.console.print("[yellow]Exiting.[/]")
             sys.exit(0)
@@ -111,6 +115,8 @@ class REPL:
         table.add_row("/model <name>", "Switch model (e.g. /model llama3.2)")
         table.add_row("/doc-type", "Show current doc_type filter")
         table.add_row("/doc-type <mode>", "Set filter: auto | user | tech | support")
+        table.add_row("/clip", "Read clipboard and prompt for query")
+        table.add_row("/clip <query>", "Read clipboard and query immediately")
         table.add_row("/quit", "Exit interactive mode")
         table.add_row("/exit", "Exit interactive mode")
         self.console.print(table)
@@ -130,7 +136,27 @@ class REPL:
             self.doc_type_mode = arg
         self.console.print(f"[green]doc_type:[/] {self.doc_type_mode}")
 
-    def _handle_query(self, query: str):
+    def _cmd_clip(self, arg: str):
+        text = read_clipboard()
+        if not text:
+            self.console.print("[red]Clipboard is empty or unreadable.[/]")
+            return
+
+        self.console.print(f"[green]✓[/] Clipboard loaded ([dim]{len(text)} chars[/])")
+        self._clipboard_text = text
+
+        if arg:
+            self._handle_query(arg, from_clipboard=True)
+        else:
+            try:
+                query = self.session.prompt(" Query> ")
+            except (KeyboardInterrupt, EOFError):
+                self._clipboard_text = None
+                return
+            if query.strip():
+                self._handle_query(query.strip(), from_clipboard=True)
+
+    def _handle_query(self, query: str, from_clipboard: bool = False):
         if self.doc_type_mode == "auto":
             filter_metadata = route_query(query)
         else:
@@ -152,6 +178,11 @@ class REPL:
                 top_k=self.top_k,
                 filter_metadata=filter_metadata,
             )
+
+        if self._clipboard_text:
+            clip = make_clipboard_chunk(self._clipboard_text, doc_type)
+            results.insert(0, clip)
+            self._clipboard_text = None
 
         self.console.print()
 
