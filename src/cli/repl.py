@@ -9,7 +9,12 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
 
-from src.clipboard.loader import make_clipboard_chunk, read_clipboard
+from src.clipboard.loader import (
+    build_full_prompt,
+    copy_to_clipboard,
+    make_clipboard_chunk,
+    read_clipboard,
+)
 from src.generation.llm_client import LLMClient, NO_CONTEXT_MESSAGE
 from src.retrieval.router import route_query
 from src.retrieval.vector_store import HybridVectorStore
@@ -97,6 +102,8 @@ class REPL:
             self._cmd_model(arg)
         elif command == "/doc-type":
             self._cmd_doc_type(arg)
+        elif command == "/paste":
+            self._cmd_paste(arg)
         elif command == "/clip":
             self._cmd_clip(arg)
         elif command in ("/quit", "/exit"):
@@ -115,8 +122,10 @@ class REPL:
         table.add_row("/model <name>", "Switch model (e.g. /model llama3.2)")
         table.add_row("/doc-type", "Show current doc_type filter")
         table.add_row("/doc-type <mode>", "Set filter: auto | user | tech | support")
-        table.add_row("/clip", "Read clipboard and prompt for query")
-        table.add_row("/clip <query>", "Read clipboard and query immediately")
+        table.add_row("/paste", "Read clipboard and prompt for query")
+        table.add_row("/paste <query>", "Read clipboard and query immediately")
+        table.add_row("/clip", "Copy full prompt to clipboard (no LLM call)")
+        table.add_row("/clip <query>", "Copy full prompt to clipboard (no LLM call)")
         table.add_row("/quit", "Exit interactive mode")
         table.add_row("/exit", "Exit interactive mode")
         self.console.print(table)
@@ -136,7 +145,7 @@ class REPL:
             self.doc_type_mode = arg
         self.console.print(f"[green]doc_type:[/] {self.doc_type_mode}")
 
-    def _cmd_clip(self, arg: str):
+    def _cmd_paste(self, arg: str):
         text = read_clipboard()
         if not text:
             self.console.print("[red]Clipboard is empty or unreadable.[/]")
@@ -146,7 +155,7 @@ class REPL:
         self._clipboard_text = text
 
         if arg:
-            self._handle_query(arg, from_clipboard=True)
+            self._handle_query(arg, from_paste=True)
         else:
             try:
                 query = self.session.prompt(" Query> ")
@@ -154,9 +163,62 @@ class REPL:
                 self._clipboard_text = None
                 return
             if query.strip():
-                self._handle_query(query.strip(), from_clipboard=True)
+                self._handle_query(query.strip(), from_paste=True)
 
-    def _handle_query(self, query: str, from_clipboard: bool = False):
+    def _cmd_clip(self, arg: str):
+        query = arg or self.session.prompt(" Query> ")
+        if not query.strip():
+            return
+
+        if self.doc_type_mode == "auto":
+            filter_metadata = route_query(query)
+        else:
+            filter_metadata = {"doc_type": [self.doc_type_mode]}
+
+        doc_type = (
+            self.doc_type_mode
+            if self.doc_type_mode != "auto"
+            else (
+                filter_metadata.get("doc_type", ["tech"])[0]
+                if filter_metadata.get("doc_type")
+                else "tech"
+            )
+        )
+
+        with self.console.status("[bold green]Searching...[/]"):
+            results = self.store.hybrid_search(
+                query=query,
+                top_k=self.top_k,
+                filter_metadata=filter_metadata,
+            )
+
+        full_prompt = build_full_prompt(query, results, doc_type)
+        if copy_to_clipboard(full_prompt):
+            lines = full_prompt.splitlines()
+            preview_lines = lines[:6]
+            preview = "\n".join(preview_lines)
+            if len(lines) > 6:
+                preview += "\n..."
+            self.console.print(
+                f"[green]✓[/] Full prompt copied to clipboard "
+                f"([dim]{len(full_prompt)} chars[/])"
+            )
+            self.console.print(Panel(preview, border_style="cyan", title="Preview"))
+        else:
+            self.console.print("[red]Failed to copy to clipboard.[/]")
+
+        if results:
+            table = Table(show_header=True, box=None)
+            table.add_column("#", style="dim", width=3)
+            table.add_column("File", style="cyan")
+            table.add_column("Source", style="dim")
+            for i, c in enumerate(results, 1):
+                table.add_row(str(i), c.metadata.filename, c.metadata.source)
+            self.console.print(
+                Panel(table, border_style="blue", title=f"Sources ({len(results)})")
+            )
+
+    def _handle_query(self, query: str, from_paste: bool = False):
         if self.doc_type_mode == "auto":
             filter_metadata = route_query(query)
         else:
@@ -188,6 +250,9 @@ class REPL:
 
         response_text = ""
         with Live(Markdown(""), refresh_per_second=12, vertical_overflow="visible") as live:
+            for token in self.llm.generate_stream(query, results, doc_type):
+                response_text += token
+                live.update(Markdown(response_text or "..."))
             for token in self.llm.generate_stream(query, results, doc_type):
                 response_text += token
                 live.update(Markdown(response_text or "..."))

@@ -38,11 +38,11 @@ mkdir data\raw\user data\raw\tech data\raw\support data\processed data\vector_db
 python main.py ingest                                    # Index documents
 python main.py query "sua pergunta"                      # Single query
 python main.py query "sua pergunta" --doc-type tech      # Filter by domain
-python main.py query "sua pergunta" --clipboard          # + clipboard context
-python main.py chat                                      # Interactive REPL
+python main.py query "sua pergunta" --paste              # + paste clipboard context
+python main.py query "sua pergunta" --clipboard          # Copy prompt to clipboard (no LLM)
 ```
 
-REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/quit`.
+REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/paste [query]`, `/quit`.
 
 ## Architecture Constraints
 - **Local-only** — no cloud APIs for embeddings or LLM inference. Use Ollama for local LLM.

@@ -58,8 +58,10 @@ Comandos disponíveis no REPL:
 | `/model <nome>` | Troca modelo (ex: `/model llama3.2`) |
 | `/doc-type` | Mostra filtro de domínio |
 | `/doc-type <modo>` | Define filtro: `auto`, `user`, `tech`, `support` |
-| `/clip` | Lê clipboard e pergunta a query |
-| `/clip <query>` | Lê clipboard e já executa a query |
+| `/paste` | Lê clipboard como contexto extra |
+| `/paste <query>` | Lê clipboard e executa query |
+| `/clip` | Copia prompt completo ao clipboard (sem chamar LLM) |
+| `/clip <query>` | Copia prompt completo ao clipboard (sem chamar LLM) |
 | `/quit` ou `/exit` | Sai do modo interativo |
 
 **Consulta única:**
@@ -67,7 +69,8 @@ Comandos disponíveis no REPL:
 ```bash
 python main.py query "Como alterar a senha?"
 python main.py query "Função de login no PHP" --doc-type tech
-python main.py query "O que esse código faz?" --clipboard
+python main.py query "O que esse código faz?" --paste
+python main.py query "Explique isso" --clipboard          # Copia prompt ao clipboard
 ```
 
 ## Estrutura

@@ -43,9 +43,18 @@ def cmd_ingest(config: dict) -> None:
 
 
 def cmd_query(
-    config: dict, query: str, doc_type_override: str | None, use_clipboard: bool = False
+    config: dict,
+    query: str,
+    doc_type_override: str | None,
+    use_paste: bool = False,
+    use_clipboard: bool = False,
 ) -> None:
-    from src.clipboard.loader import make_clipboard_chunk, read_clipboard
+    from src.clipboard.loader import (
+        build_full_prompt,
+        copy_to_clipboard,
+        make_clipboard_chunk,
+        read_clipboard,
+    )
     from src.retrieval.router import route_query
     from src.retrieval.vector_store import HybridVectorStore
 
@@ -89,7 +98,7 @@ def cmd_query(
         or "tech"
     )
 
-    if use_clipboard:
+    if use_paste:
         text = read_clipboard()
         if text:
             clip = make_clipboard_chunk(text, doc_type)
@@ -101,6 +110,19 @@ def cmd_query(
         temperature=llm_cfg.get("temperature", 0.1),
         max_tokens=llm_cfg.get("max_tokens", 1024),
     )
+
+    if use_clipboard:
+        full_prompt = build_full_prompt(query, results, doc_type)
+        if copy_to_clipboard(full_prompt):
+            print(f"✓ Full prompt copied to clipboard ({len(full_prompt)} chars)")
+            print("--- Preview ---")
+            preview_lines = full_prompt.splitlines()[:6]
+            print("\n".join(preview_lines))
+            if len(full_prompt.splitlines()) > 6:
+                print("...")
+        else:
+            print("Failed to copy to clipboard.")
+        return
 
     answer = client.generate(query, results, doc_type=doc_type)
 
@@ -138,9 +160,14 @@ def main() -> None:
         help="Override document type filter",
     )
     query_parser.add_argument(
-        "--clipboard",
+        "--paste",
         action="store_true",
         help="Read clipboard content as additional context",
+    )
+    query_parser.add_argument(
+        "--clipboard",
+        action="store_true",
+        help="Copy full prompt to clipboard (no LLM call)",
     )
     query_parser.set_defaults(func="query")
 
@@ -153,7 +180,7 @@ def main() -> None:
     if args.func == "ingest":
         cmd_ingest(config)
     elif args.func == "query":
-        cmd_query(config, args.query_text, args.doc_type, args.clipboard)
+        cmd_query(config, args.query_text, args.doc_type, args.paste, args.clipboard)
     elif args.func == "chat":
         from src.cli.repl import REPL
         repl = REPL(config)
