@@ -51,13 +51,15 @@ python main.py chat
 Comandos disponíveis no REPL:
 
 | Comando | Descrição |
-|---|---|
+|---|---|---|
 | `/help` | Lista comandos |
 | `/clear` | Limpa a tela |
 | `/model` | Mostra modelo atual |
 | `/model <nome>` | Troca modelo (ex: `/model llama3.2`) |
 | `/doc-type` | Mostra filtro de domínio |
 | `/doc-type <modo>` | Define filtro: `auto`, `user`, `tech`, `support` |
+| `/clip` | Lê clipboard e pergunta a query |
+| `/clip <query>` | Lê clipboard e já executa a query |
 | `/quit` ou `/exit` | Sai do modo interativo |
 
 **Consulta única:**
@@ -65,6 +67,7 @@ Comandos disponíveis no REPL:
 ```bash
 python main.py query "Como alterar a senha?"
 python main.py query "Função de login no PHP" --doc-type tech
+python main.py query "O que esse código faz?" --clipboard
 ```
 
 ## Estrutura
@@ -81,8 +84,10 @@ src/
 ├── generation/
 │   ├── prompts.py         # Templates de prompt por domínio
 │   └── llm_client.py      # Cliente Ollama (HTTP + streaming)
-└── cli/
-    └── repl.py            # Modo interativo (prompt_toolkit + rich)
+├── cli/
+│   └── repl.py            # Modo interativo (prompt_toolkit + rich)
+└── clipboard/
+    └── loader.py          # Leitura e chunk do clipboard
 ```
 
 ## Configuração
