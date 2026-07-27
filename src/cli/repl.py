@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 
 from prompt_toolkit import PromptSession
@@ -57,6 +58,10 @@ class REPL:
         )
         self._clipboard_text: str | None = None
 
+    def _cleanup(self) -> None:
+        self.store.clear()
+        self.console.print("[dim]Memória liberada.[/]")
+
     def run(self):
         self._show_banner()
         while True:
@@ -67,6 +72,7 @@ class REPL:
                 continue
             except EOFError:
                 self.console.print("\n[yellow]Exiting.[/]")
+                self._cleanup()
                 break
 
             if not user_input.strip():
@@ -108,7 +114,10 @@ class REPL:
             self._cmd_clip(arg)
         elif command in ("/quit", "/exit"):
             self.console.print("[yellow]Exiting.[/]")
+            self._cleanup()
             sys.exit(0)
+        elif command == "/reset":
+            self._cmd_reset()
         else:
             self.console.print(f"[red]Unknown command:[/] {command}  Type [bold]/help[/]")
 
@@ -128,6 +137,7 @@ class REPL:
         table.add_row("/clip <query>", "Copy full prompt to clipboard (no LLM call)")
         table.add_row("/quit", "Exit interactive mode")
         table.add_row("/exit", "Exit interactive mode")
+        table.add_row("/reset", "Clear memory + delete vector DB and chunks")
         self.console.print(table)
 
     def _cmd_model(self, arg: str):
@@ -164,6 +174,20 @@ class REPL:
                 return
             if query.strip():
                 self._handle_query(query.strip(), from_paste=True)
+
+    def _cmd_reset(self):
+        self._cleanup()
+        db_dir = self.config["paths"]["vector_db_dir"]
+        if os.path.isdir(db_dir):
+            shutil.rmtree(db_dir)
+            self.console.print(f"[red]Banco vetorial removido:[/] {db_dir}")
+        processed_dir = self.config["paths"]["processed_dir"]
+        chunks_file = os.path.join(processed_dir, "chunks.json")
+        if os.path.isfile(chunks_file):
+            os.remove(chunks_file)
+            self.console.print(f"[red]Chunks removidos:[/] {chunks_file}")
+        self.console.print("[yellow]Reset completo. Execute 'ingest' novamente para reindexar.[/]")
+        sys.exit(0)
 
     def _cmd_clip(self, arg: str):
         query = arg or self.session.prompt(" Query> ")

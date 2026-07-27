@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import os
@@ -137,3 +138,16 @@ class HybridVectorStore:
             "Vector store loaded from %s (%d chunks)", db_dir, len(self.chunks)
         )
         return True
+
+    def clear(self) -> None:
+        logger.info("Clearing vector store from memory...")
+        self.chunks.clear()
+        self.embeddings = None
+        if self.bm25 is not None:
+            self.bm25 = None
+        self._tokenized_corpus.clear()
+        if self.embedder is not None:
+            del self.embedder
+            self.embedder = None
+        gc.collect()
+        logger.info("Vector store memory released.")

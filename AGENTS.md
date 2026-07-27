@@ -42,7 +42,7 @@ python main.py query "sua pergunta" --paste              # + paste clipboard con
 python main.py query "sua pergunta" --clipboard          # Copy prompt to clipboard (no LLM)
 ```
 
-REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/paste [query]`, `/quit`.
+REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/paste [query]`, `/quit`, `/reset`.
 
 ## Architecture Constraints
 - **Local-only** — no cloud APIs for embeddings or LLM inference. Use Ollama for local LLM.

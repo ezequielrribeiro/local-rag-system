@@ -62,7 +62,8 @@ Comandos disponíveis no REPL:
 | `/paste <query>` | Lê clipboard e executa query |
 | `/clip` | Copia prompt completo ao clipboard (sem chamar LLM) |
 | `/clip <query>` | Copia prompt completo ao clipboard (sem chamar LLM) |
-| `/quit` ou `/exit` | Sai do modo interativo |
+| `/quit` ou `/exit` | Sai do modo interativo (libera RAM) |
+| `/reset` | Limpa RAM + apaga banco vetorial e chunks do disco |
 
 **Consulta única:**
 
@@ -92,6 +93,15 @@ src/
 └── clipboard/
     └── loader.py          # Leitura e chunk do clipboard
 ```
+
+## Gerenciamento de Memória
+
+| Ação | O que libera |
+|---|---|
+| `/quit`, `/exit` ou `Ctrl+D` | Libera da RAM: modelo `bge-m3`, embeddings, índice BM25, chunks |
+| `/reset` | Libera RAM + apaga `data/vector_db/` e `data/processed/chunks.json` do disco |
+
+Após `/reset`, execute `python main.py ingest` para reindexar os documentos.
 
 ## Configuração
 
