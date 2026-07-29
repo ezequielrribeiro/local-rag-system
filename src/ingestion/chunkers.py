@@ -2,10 +2,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
 from src.models import ChunkMetadata, DocType, DocumentChunk, FileFormat
@@ -92,36 +89,88 @@ class PHPChunker(BaseChunker):
 
 
 class MarkdownChunker(BaseChunker):
-    def __init__(self):
-        self.splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=[
-                ("#", "Header 1"),
-                ("##", "Header 2"),
-                ("###", "Header 3"),
-            ]
+    _HEADER_RE = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
+    _HEADER_LEVELS = {"#": "Header 1", "##": "Header 2", "###": "Header 3"}
+    _HEADER_DEPTH = {"#": 1, "##": 2, "###": 3}
+    _LEVEL_MAP = {"Header 1": 1, "Header 2": 2, "Header 3": 3}
+
+    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 64):
+        self._splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
         )
+
+    @staticmethod
+    def _parse_sections(text: str) -> list[tuple[dict[str, str], str]]:
+        lines = text.splitlines(keepends=True)
+        sections: list[tuple[dict[str, str], str]] = []
+        active_headers: dict[str, str] = {}
+        current_lines: list[str] = []
+
+        def flush():
+            if current_lines:
+                content = "".join(current_lines).strip()
+                if content:
+                    sections.append((dict(active_headers), content))
+                current_lines.clear()
+
+        for line in lines:
+            m = MarkdownChunker._HEADER_RE.match(line)
+            if m:
+                flush()
+                hashes = m.group(1)
+                title = m.group(2).strip()
+                depth = MarkdownChunker._HEADER_DEPTH[hashes]
+                for hdr_key in list(active_headers.keys()):
+                    if MarkdownChunker._LEVEL_MAP[hdr_key] >= depth:
+                        del active_headers[hdr_key]
+                active_headers[MarkdownChunker._HEADER_LEVELS[hashes]] = title
+            else:
+                current_lines.append(line)
+
+        flush()
+        return sections
 
     def chunk(self, file_path: str, doc_type: DocType) -> list[DocumentChunk]:
         with open(file_path, encoding="utf-8", errors="replace") as f:
             text = f.read()
 
-        langchain_docs = self.splitter.split_text(text)
+        sections = self._parse_sections(text)
         chunks = []
-        for i, lc_doc in enumerate(langchain_docs):
-            metadata = ChunkMetadata(
-                source=file_path,
-                filename=os.path.basename(file_path),
-                doc_type=doc_type,
-                format=FileFormat.MARKDOWN,
-                chunk_index=i,
-                headers=lc_doc.metadata if lc_doc.metadata else None,
-            )
-            chunk = DocumentChunk(
-                chunk_id=DocumentChunk.generate_id(file_path, i),
-                page_content=lc_doc.page_content,
-                metadata=metadata,
-            )
-            chunks.append(chunk)
+        chunk_index = 0
+        for headers, content in sections:
+            if len(content) <= self._splitter._chunk_size:
+                metadata = ChunkMetadata(
+                    source=file_path,
+                    filename=os.path.basename(file_path),
+                    doc_type=doc_type,
+                    format=FileFormat.MARKDOWN,
+                    chunk_index=chunk_index,
+                    headers=headers or None,
+                )
+                chunks.append(DocumentChunk(
+                    chunk_id=DocumentChunk.generate_id(file_path, chunk_index),
+                    page_content=content,
+                    metadata=metadata,
+                ))
+                chunk_index += 1
+            else:
+                sub_splits = self._splitter.split_text(content)
+                for sub in sub_splits:
+                    metadata = ChunkMetadata(
+                        source=file_path,
+                        filename=os.path.basename(file_path),
+                        doc_type=doc_type,
+                        format=FileFormat.MARKDOWN,
+                        chunk_index=chunk_index,
+                        headers=headers or None,
+                    )
+                    chunks.append(DocumentChunk(
+                        chunk_id=DocumentChunk.generate_id(file_path, chunk_index),
+                        page_content=sub,
+                        metadata=metadata,
+                    ))
+                    chunk_index += 1
         return chunks
 
 
