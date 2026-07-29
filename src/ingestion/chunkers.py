@@ -30,9 +30,11 @@ class PHPChunker(BaseChunker):
     _FUNCTION_REGEX = re.compile(
         r"(?:^|\n)\s*(?:public|protected|private|static|\s)*\s*function\s+(\w+)\s*\("
     )
+    _PHP_OPEN_RE = re.compile(r"<\?(?:php)?\s*")
+    _PHP_CLOSE_RE = re.compile(r"\?>")
 
     def __init__(self, chunk_size: int = 512, chunk_overlap: int = 64):
-        self.splitter = RecursiveCharacterTextSplitter(
+        self._php_splitter = RecursiveCharacterTextSplitter(
             separators=[
                 "\nclass ",
                 "\nfunction ",
@@ -46,12 +48,104 @@ class PHPChunker(BaseChunker):
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
+        self._text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
 
     def _detect_classes(self, text: str) -> list[str]:
         return self._CLASS_REGEX.findall(text)
 
     def _detect_functions(self, text: str) -> list[str]:
         return self._FUNCTION_REGEX.findall(text)
+
+    @staticmethod
+    def _split_blocks(text: str) -> list[tuple[bool, str]]:
+        blocks: list[tuple[bool, str]] = []
+        pos = 0
+        in_php = False
+        while pos < len(text):
+            if not in_php:
+                m = PHPChunker._PHP_OPEN_RE.search(text, pos)
+                if m is None:
+                    blocks.append((False, text[pos:]))
+                    break
+                if m.start() > pos:
+                    blocks.append((False, text[pos : m.start()]))
+                blocks.append((True, m.group(0)))
+                pos = m.end()
+                in_php = True
+            else:
+                m = PHPChunker._PHP_CLOSE_RE.search(text, pos)
+                if m is None:
+                    blocks[-1] = (True, blocks[-1][1] + text[pos:])
+                    break
+                blocks[-1] = (True, blocks[-1][1] + text[pos : m.end()])
+                pos = m.end()
+                in_php = False
+        return blocks
+
+    def _chunk_php_block(
+        self,
+        php_code: str,
+        file_path: str,
+        filename: str,
+        doc_type: DocType,
+        chunk_index: int,
+    ) -> tuple[list[DocumentChunk], int]:
+        full_classes = self._detect_classes(php_code)
+        full_functions = self._detect_functions(php_code)
+        langchain_docs = self._php_splitter.create_documents([php_code])
+        chunks = []
+        for i, lc_doc in enumerate(langchain_docs):
+            chunk_text = lc_doc.page_content
+            chunk_classes = self._CLASS_REGEX.findall(chunk_text)
+            chunk_functions = self._FUNCTION_REGEX.findall(chunk_text)
+            metadata = ChunkMetadata(
+                source=file_path,
+                filename=filename,
+                doc_type=doc_type,
+                format=FileFormat.PHP_CODE,
+                chunk_index=chunk_index,
+                detected_classes=chunk_classes or (full_classes if i == 0 else None),
+                detected_functions=chunk_functions
+                or (full_functions if i == 0 else None),
+            )
+            chunks.append(DocumentChunk(
+                chunk_id=DocumentChunk.generate_id(file_path, chunk_index),
+                page_content=chunk_text,
+                metadata=metadata,
+            ))
+            chunk_index += 1
+        return chunks, chunk_index
+
+    def _chunk_text_block(
+        self,
+        text: str,
+        file_path: str,
+        filename: str,
+        doc_type: DocType,
+        chunk_index: int,
+    ) -> tuple[list[DocumentChunk], int]:
+        sub_splits = self._text_splitter.split_text(text)
+        chunks = []
+        for sub in sub_splits:
+            if not sub.strip():
+                continue
+            metadata = ChunkMetadata(
+                source=file_path,
+                filename=filename,
+                doc_type=doc_type,
+                format=FileFormat.MARKDOWN,
+                chunk_index=chunk_index,
+            )
+            chunks.append(DocumentChunk(
+                chunk_id=DocumentChunk.generate_id(file_path, chunk_index),
+                page_content=sub,
+                metadata=metadata,
+            ))
+            chunk_index += 1
+        return chunks, chunk_index
 
     def chunk(self, file_path: str, doc_type: DocType) -> list[DocumentChunk]:
         if self.should_exclude(file_path):
@@ -60,32 +154,26 @@ class PHPChunker(BaseChunker):
         with open(file_path, encoding="utf-8", errors="replace") as f:
             text = f.read()
 
-        full_classes = self._detect_classes(text)
-        full_functions = self._detect_functions(text)
+        blocks = self._split_blocks(text)
+        filename = os.path.basename(file_path)
+        all_chunks: list[DocumentChunk] = []
+        chunk_index = 0
 
-        langchain_docs = self.splitter.create_documents([text])
-        chunks = []
-        for i, lc_doc in enumerate(langchain_docs):
-            chunk_text = lc_doc.page_content
-            chunk_classes = self._CLASS_REGEX.findall(chunk_text)
-            chunk_functions = self._FUNCTION_REGEX.findall(chunk_text)
-            metadata = ChunkMetadata(
-                source=file_path,
-                filename=os.path.basename(file_path),
-                doc_type=doc_type,
-                format=FileFormat.PHP_CODE,
-                chunk_index=i,
-                detected_classes=chunk_classes or (full_classes if i == 0 else None),
-                detected_functions=chunk_functions
-                or (full_functions if i == 0 else None),
-            )
-            chunk = DocumentChunk(
-                chunk_id=DocumentChunk.generate_id(file_path, i),
-                page_content=chunk_text,
-                metadata=metadata,
-            )
-            chunks.append(chunk)
-        return chunks
+        for is_php, content in blocks:
+            content = content.strip()
+            if not content:
+                continue
+            if is_php:
+                chunks, chunk_index = self._chunk_php_block(
+                    content, file_path, filename, doc_type, chunk_index
+                )
+            else:
+                chunks, chunk_index = self._chunk_text_block(
+                    content, file_path, filename, doc_type, chunk_index
+                )
+            all_chunks.extend(chunks)
+
+        return all_chunks
 
 
 class MarkdownChunker(BaseChunker):
