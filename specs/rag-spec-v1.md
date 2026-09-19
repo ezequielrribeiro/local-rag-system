@@ -104,6 +104,18 @@ interface DocumentChunk {
 * **Inputs:** User query + Top-K Chunks from `HybridVectorStore`
 * **Responsibility:** Construct context-augmented prompt, execute local LLM inference (via Ollama or local endpoint), and append source citations.
 
+### Component 5: `RESTSearchAPI`
+* **Inputs:** HTTP request with a query string and optional `doc_type` filter.
+* **Responsibility:** Expose hybrid retrieval as a local REST API (FastAPI). Search only — no LLM call. Reuses `HybridVectorStore.hybrid_search` and `QueryRouter` (REQ-F05/F06) without duplicating ingestion or retrieval logic.
+* **Endpoints:**
+  * `GET /health` — returns service status, whether the vector index is loaded, and the number of indexed chunks.
+  * `POST /api/search` — body `{ "query": str, "doc_type": "auto"|"user"|"tech"|"support", "top_k": int? }`; returns `doc_type_used`, `routed_to`, `count`, and the serialized `DocumentChunk[]`.
+* **Contracts:**
+  * `422` if `query` is empty (Pydantic validation).
+  * `503` if no vector index exists — instructs caller to run `ingest` first.
+  * Serialization mirrors `DocumentChunk` with `metadata.doc_type` / `metadata.format` as string enum values.
+* **Persistence:** The shared `HybridVectorStore` is cached per process (lazy-loaded on first search) to avoid reloading the embedding model, which is memory-heavy (REQ-N01). The index existence is checked *before* instantiating the model so failed requests fail fast.
+
 ---
 
 ## 5. System Prompts Specification
@@ -187,9 +199,15 @@ rag-system/
 │   └── generation/
 │       ├── prompts.py        # Prompts do sistema por domínio
 │       └── llm_client.py     # Conector para Ollama / LLM local
+│   └── api/
+│       ├── app.py            # Factory FastAPI e rotas
+│       ├── service.py        # RAGSearchService (busca híbrida via HTTP)
+│       ├── schemas.py        # Models Pydantic de busca
+│       └── config.py         # Carregamento de config com cache
 ├── tests/
 │   ├── test_chunking.py      # Testes unitários para PHP e MD
-│   └── test_retrieval.py     # Testes de relevância da busca
+│   ├── test_retrieval.py     # Testes de relevância da busca
+│   └── test_api.py           # Testes do endpoint de busca REST
 ├── config.yaml               # Modelos, top_k e parâmetros
 └── main.py                   # CLI e interface principal
 ```

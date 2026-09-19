@@ -16,8 +16,9 @@ rag-system/
 │   ├── retrieval/{vector_store,router}.py
 │   ├── generation/{prompts,llm_client}.py
 │   ├── cli/repl.py                 # Interactive REPL
-│   └── clipboard/loader.py         # Clipboard read + chunk
-├── tests/{test_chunking,test_retrieval}.py
+│   ├── clipboard/loader.py         # Clipboard read + chunk
+│   └── api/{app,service,schemas,config}.py  # REST search API (FastAPI)
+├── tests/{test_chunking,test_retrieval,test_api}.py
 ├── config.yaml
 ├── requirements.txt
 ├── main.py
@@ -40,7 +41,10 @@ python main.py query "sua pergunta"                      # Single query
 python main.py query "sua pergunta" --doc-type tech      # Filter by domain
 python main.py query "sua pergunta" --paste              # + paste clipboard context
 python main.py query "sua pergunta" --clipboard          # Copy prompt to clipboard (no LLM)
+python main.py serve --host 127.0.0.1 --port 8000        # REST API (search only, no LLM)
 ```
+
+REST API endpoints: `GET /health`, `POST /api/search`. Shared vector store is cached per process.
 
 REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/paste [query]`, `/quit`, `/reset`.
 
@@ -73,3 +77,4 @@ REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [q
 Run single test: `pytest tests/test_<name>.py -v`
 1. **test_chunking** — PHP vendor exclusion, markdown heading splitting
 2. **test_retrieval** — hybrid search, metadata filtering, hallucination prevention
+3. **test_api** — health, doc_type routing, serialization, no-index 503

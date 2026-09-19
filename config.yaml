@@ -13,6 +13,10 @@ retrieval:
   similarity_threshold: 0.3
   rerank_method: reciprocal_rank_fusion
 
+server:
+  host: 127.0.0.1
+  port: 8000
+
 paths:
   raw_dir: data/raw
   processed_dir: data/processed

@@ -139,6 +139,16 @@ def cmd_query(
     print("=" * 60)
 
 
+def cmd_serve(config: dict, host: str, port: int) -> None:
+    import uvicorn
+
+    from src.api.app import create_app
+
+    app = create_app(config)
+    logger.info("Starting REST API on http://%s:%d", host, port)
+    uvicorn.run(app, host=host, port=port)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Local Multi-Layer RAG System"
@@ -174,7 +184,24 @@ def main() -> None:
     chat_parser = subparsers.add_parser("chat", help="Start interactive REPL")
     chat_parser.set_defaults(func="chat")
 
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start the REST API server"
+    )
+    serve_parser.add_argument(
+        "--host",
+        default=None,
+        help="Bind host (default: config server.host or 127.0.0.1)",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Bind port (default: config server.port or 8000)",
+    )
+    serve_parser.set_defaults(func="serve")
+
     args = parser.parse_args()
+
     config = load_config(args.config)
 
     if args.func == "ingest":
@@ -185,6 +212,11 @@ def main() -> None:
         from src.cli.repl import REPL
         repl = REPL(config)
         repl.run()
+    elif args.func == "serve":
+        server_cfg = config.get("server", {})
+        host = args.host or server_cfg.get("host", "127.0.0.1")
+        port = args.port if args.port is not None else server_cfg.get("port", 8000)
+        cmd_serve(config, host, port)
 
 
 if __name__ == "__main__":
