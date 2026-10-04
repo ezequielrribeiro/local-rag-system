@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 
@@ -429,3 +430,81 @@ def test_serve_falls_back_to_defaults_without_server_block(
 
     assert calls["host"] == "127.0.0.1"
     assert calls["port"] == 8000
+
+
+def _poison_llm(monkeypatch) -> None:
+    """Make any LLM/Ollama egress fail loudly instead of silently succeeding."""
+    import requests
+
+    from src.generation.llm_client import LLMClient
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "the REST API must stay retrieval-only: attempted an LLM call"
+        )
+
+    monkeypatch.setattr(requests, "post", forbidden)
+    monkeypatch.setattr(requests, "get", forbidden)
+    monkeypatch.setattr(LLMClient, "generate", forbidden)
+    monkeypatch.setattr(LLMClient, "generate_stream", forbidden)
+
+
+def test_api_endpoints_never_call_the_llm(tmp_path, monkeypatch):
+    """Regression guard: /health and /api/search must not reach the LLM."""
+    _poison_llm(monkeypatch)
+
+    fake = _fake_chunk()
+    _mock_loaded_store(monkeypatch, [fake])
+    monkeypatch.setattr(
+        "src.retrieval.vector_store.HybridVectorStore.hybrid_search",
+        lambda self, query, top_k=5, filter_metadata=None, alpha=0.5: [fake],
+    )
+    config = _make_empty_config(tmp_path)
+    _touch_index(config)
+    client = TestClient(create_app(config))
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["num_chunks"] == 1
+
+    for doc_type in ("auto", "user", "tech", "support"):
+        resp = client.post(
+            "/api/search", json={"query": "resetar senha", "doc_type": doc_type}
+        )
+        assert resp.status_code == 200, doc_type
+        assert resp.json()["count"] == 1
+
+
+def test_api_error_paths_never_call_the_llm(tmp_path, monkeypatch):
+    """The 503 and 422 paths must not fall back to the LLM either."""
+    _poison_llm(monkeypatch)
+    _mock_store_class(monkeypatch)
+    client = TestClient(create_app(_make_empty_config(tmp_path)))
+
+    assert client.get("/health").status_code == 200
+    assert (
+        client.post("/api/search", json={"query": "oi"}).status_code == 503
+    )
+    assert (
+        client.post("/api/search", json={"query": ""}).status_code == 422
+    )
+
+
+def test_api_and_serve_do_not_import_the_llm_client():
+    """Structural guard: the API process must not even load the LLM module."""
+    code = (
+        "import sys\n"
+        "import src.api.app, src.api.service, src.api.schemas\n"
+        "import main\n"
+        "assert 'src.generation.llm_client' not in sys.modules, sorted(sys.modules)\n"
+        "assert 'src.cli.repl' not in sys.modules, sorted(sys.modules)\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ok" in result.stdout

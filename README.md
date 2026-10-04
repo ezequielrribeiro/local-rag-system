@@ -108,6 +108,8 @@ python main.py serve --host 127.0.0.1 --port 8080
 | `GET` | `/health` | Status do índice (carregado? nº de chunks) |
 | `POST` | `/api/search` | Busca híbrida; retorna chunks recuperados (sem LLM) |
 
+A API é **somente recuperação** (spec REQ-F08): ela não consulta o LLM e não importa o módulo do cliente de LLM. A geração de resposta existe apenas no CLI (`query` e REPL). Na prática, isso significa que a API continua no ar com o Ollama desligado — falhas de recuperação retornam `503` (índice ausente) ou `422` (query vazia), nunca um fallback para geração.
+
 **Exemplos:**
 
 ```bash

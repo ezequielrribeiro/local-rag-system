@@ -53,6 +53,8 @@ python main.py serve --host 127.0.0.1 --port 8000        # REST API (search only
 
 REST API endpoints: `GET /health`, `POST /api/search`. Shared vector store is cached per process.
 
+The API is **retrieval-only** (spec REQ-F08): it never calls the LLM and must not import `src.generation.llm_client` or `src.cli.repl`. `main.py` imports `LLMClient` lazily inside `cmd_query` to keep that isolation structural. Retrieval failures surface as `503`/`422`, never as a fallback to generation. Guarded by `test_api_endpoints_never_call_the_llm` (poisons `requests` + the client) and `test_api_and_serve_do_not_import_the_llm_client` (subprocess `sys.modules` check).
+
 REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [query]`, `/paste [query]`, `/quit`, `/reset`.
 
 ## Architecture Constraints

@@ -35,6 +35,7 @@ The architecture enforces strict metadata tagging, hybrid search (Lexical + Vect
 * **[REQ-F05] Hybrid Retrieval Mechanism:** The retrieval system MUST perform dense vector search (embeddings) combined with sparse lexical search (BM25) over the vector index.
 * **[REQ-F06] Domain Query Routing:** The query handler MUST route or filter searches based on user intent (e.g., technical code questions filter for `doc_type: ["tech", "support"]`).
 * **[REQ-F07] Grounded Answer Generation:** The LLM prompt MUST mandate that answers strictly reference provided retrieved context and explicitly decline to answer if context is absent.
+* **[REQ-F08] Retrieval-Only API Boundary:** The REST API MUST perform retrieval and serialization only. The API process MUST NOT invoke the LLM, and MUST NOT import the LLM client module at all — no `src.generation.llm_client` / `src.cli.repl` dependency on the API or `serve` path. Retrieval failures MUST surface as HTTP status codes (`503`/`422`), never as a fallback to answer generation. This keeps the API available when the local LLM is unreachable (REQ-N01).
 
 ### 2.2 Non-Functional Requirements
 
@@ -106,7 +107,7 @@ interface DocumentChunk {
 
 ### Component 5: `RESTSearchAPI`
 * **Inputs:** HTTP request with a query string and optional `doc_type` filter.
-* **Responsibility:** Expose hybrid retrieval as a local REST API (FastAPI). Search only — no LLM call. Reuses `HybridVectorStore.hybrid_search` and `QueryRouter` (REQ-F05/F06) without duplicating ingestion or retrieval logic.
+* **Responsibility:** Expose hybrid retrieval as a local REST API (FastAPI). Search only — no LLM call (REQ-F08). Reuses `HybridVectorStore.hybrid_search` and `QueryRouter` (REQ-F05/F06) without duplicating ingestion or retrieval logic. Answer generation belongs exclusively to the CLI (`query`/`repl`), never this component.
 * **Endpoints:**
   * `GET /health` — returns service status, whether the vector index is loaded, and the number of indexed chunks.
   * `POST /api/search` — body `{ "query": str, "doc_type": "auto"|"user"|"tech"|"support", "top_k": int? }`; returns `doc_type_used`, `routed_to`, `count`, and the serialized `DocumentChunk[]`.
@@ -202,6 +203,23 @@ Feature: Specialized JavaScript Chunking
     And no chunks should originate from "app.bundle.js"
     And the generated chunks for "auth.js" must contain metadata format "javascript_code"
     And "detected_functions" MUST include declared, assigned, and class method names
+```
+
+### Scenario 6: REST API performs retrieval only, never generation
+```gherkin
+Feature: Retrieval-Only API Boundary
+  Scenario: Querying the API while the local LLM is unreachable
+    Given a vector index with at least one indexed chunk
+    And no LLM endpoint reachable at the configured Ollama endpoint
+    When a client calls "GET /health"
+    Then the response status MUST be 200
+    And the response MUST report the real "num_chunks" of the loaded index
+    When a client calls "POST /api/search" with a query
+    Then the response MUST contain only retrieved chunks and their metadata
+    And no LLM client method MUST be invoked
+    When no vector index exists
+    Then "POST /api/search" MUST return 503
+    And the API MUST NOT fall back to answer generation to produce a response
 ```
 
 ---

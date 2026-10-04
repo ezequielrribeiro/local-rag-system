@@ -4,8 +4,6 @@ import sys
 
 import yaml
 
-from src.generation.llm_client import LLMClient
-
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -55,6 +53,7 @@ def cmd_query(
         make_clipboard_chunk,
         read_clipboard,
     )
+    from src.generation.llm_client import LLMClient
     from src.retrieval.router import route_query
     from src.retrieval.vector_store import HybridVectorStore
 
