@@ -1,0 +1,9 @@
+# Dependências de desenvolvimento/testes.
+# Uso: pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest>=9.0.0
+
+# TestClient do Starlette (usado em tests/test_api.py) exige httpx2.
+# O httpx "comum" ainda funciona, mas emite StarletteDeprecationWarning.
+httpx2>=2.13.0

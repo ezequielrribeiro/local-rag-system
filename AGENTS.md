@@ -21,6 +21,7 @@ rag-system/
 ├── tests/{test_chunking,test_retrieval,test_api}.py
 ├── config.yaml
 ├── requirements.txt
+├── requirements-dev.txt
 ├── main.py
 ├── README.md
 └── LICENSE
@@ -32,6 +33,12 @@ python -m venv .venv
 .venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 mkdir data\raw\user data\raw\tech data\raw\support data\processed data\vector_db
+```
+
+## Setup (dev/testes)
+```bash
+pip install -r requirements-dev.txt   # inclui requirements.txt + pytest + httpx2
+pytest tests/ -v
 ```
 
 ## Commands

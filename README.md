@@ -17,6 +17,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+Para rodar os testes, instale também as dependências de desenvolvimento:
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
 Crie os diretórios de dados antes do primeiro uso:
 
 ```bash

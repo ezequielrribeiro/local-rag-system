@@ -31,14 +31,22 @@ def create_app(config: dict | None = None) -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
+        service: RAGSearchService = app.state.service
+        if not RAGSearchService.vector_index_exists(cfg):
+            return HealthResponse(
+                status="ok", vector_index_loaded=False, num_chunks=0
+            )
+
+        try:
+            num_chunks = len(service.store.chunks)
+        except IndexNotLoadedError:
+            logger.warning("Vector index present on disk but could not be loaded.")
+            return HealthResponse(
+                status="ok", vector_index_loaded=False, num_chunks=0
+            )
+
         return HealthResponse(
-            status="ok",
-            vector_index_loaded=RAGSearchService.vector_index_exists(cfg),
-            num_chunks=(
-                len(app.state.service.store.chunks)
-                if app.state.service.index_loaded
-                else 0
-            ),
+            status="ok", vector_index_loaded=True, num_chunks=num_chunks
         )
 
     @app.post("/api/search", response_model=SearchResponse)
