@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 
 from src.ingestion.chunkers import (
@@ -15,6 +16,18 @@ def _write_temp(content: str, suffix: str) -> str:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(content)
     return path
+
+
+def _assert_no_source_loss(source: str, chunks) -> None:
+    """Every meaningful source line must survive in some chunk."""
+    rebuilt = re.sub(r"\s+", " ", "".join(c.page_content for c in chunks))
+    for line in source.splitlines():
+        stripped = line.strip()
+        if len(stripped) < 8:
+            continue
+        assert re.sub(r"\s+", " ", stripped) in rebuilt, (
+            f"source line dropped by chunking: {stripped}"
+        )
 
 
 def test_php_vendor_exclusion():
@@ -324,6 +337,78 @@ def test_javascript_empty_file_yields_no_chunks():
     tmppath = _write_temp("", ".js")
     try:
         assert chunker.chunk(tmppath, DocType.TECH) == []
+    finally:
+        os.unlink(tmppath)
+
+
+def test_python_keeps_decorators_with_their_definition():
+    source = (
+        "@dataclass\n"
+        "class Config:\n"
+        + "".join(f"    field_{i}: int = {i}\n" for i in range(20))
+        + "\n    def total(self) -> int:\n        return 0\n"
+    )
+    tmppath = _write_temp(source, ".py")
+    try:
+        chunks = PythonChunker(chunk_size=200, chunk_overlap=32).chunk(
+            tmppath, DocType.TECH
+        )
+        decorator_chunk = next(
+            c for c in chunks if "@dataclass" in c.page_content
+        )
+        assert "class Config:" in decorator_chunk.page_content
+        _assert_no_source_loss(source, chunks)
+    finally:
+        os.unlink(tmppath)
+
+
+def test_python_keeps_signature_with_its_docstring():
+    source = (
+        "def process(items):\n"
+        '    """Process a batch of items carefully."""\n'
+        + "".join(f"    value_{i} = compute({i})\n" for i in range(30))
+        + "    return items\n"
+    )
+    tmppath = _write_temp(source, ".py")
+    try:
+        chunks = PythonChunker(chunk_size=300, chunk_overlap=32).chunk(
+            tmppath, DocType.TECH
+        )
+        signature_chunk = next(
+            c for c in chunks if "def process(items):" in c.page_content
+        )
+        assert "Process a batch of items carefully." in signature_chunk.page_content
+        _assert_no_source_loss(source, chunks)
+    finally:
+        os.unlink(tmppath)
+
+
+def test_python_chunking_never_drops_source_lines():
+    source = (
+        PYTHON_SOURCE
+        + "\n\nclass Report:\n"
+        + "".join(
+            f"    def column_{i}(self):\n        return {i}\n\n"
+            for i in range(40)
+        )
+    )
+    tmppath = _write_temp(source, ".py")
+    try:
+        chunks = PythonChunker().chunk(tmppath, DocType.TECH)
+        assert len(chunks) > 1
+        _assert_no_source_loss(source, chunks)
+    finally:
+        os.unlink(tmppath)
+
+
+def test_javascript_chunking_never_drops_source_lines():
+    tmppath = _write_temp(JAVASCRIPT_SOURCE, ".js")
+    try:
+        chunks = JavaScriptChunker(chunk_size=200, chunk_overlap=32).chunk(
+            tmppath, DocType.TECH
+        )
+        assert len(chunks) > 1
+        _assert_no_source_loss(JAVASCRIPT_SOURCE, chunks)
     finally:
         os.unlink(tmppath)
 

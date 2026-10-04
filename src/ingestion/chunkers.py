@@ -11,6 +11,10 @@ from src.models import ChunkMetadata, DocType, DocumentChunk, FileFormat
 
 logger = logging.getLogger(__name__)
 
+# Guards the recursive AST sub-split in PythonChunker against pathological
+# nesting; beyond this depth the recursive text splitter takes over.
+_MAX_NESTED_SPLIT_DEPTH = 3
+
 
 class BaseChunker(ABC):
     VENDOR_EXCLUDE_PATTERNS = [
@@ -71,6 +75,13 @@ class CodeChunker(BaseChunker):
 
     def _detect_functions(self, text: str) -> list[str]:
         raise NotImplementedError
+
+    def _sub_split(self, unit: str, depth: int = 0) -> list[str]:
+        """Split an oversized structural unit into smaller pieces.
+
+        Subclasses with a parser override this to keep boundaries exact.
+        """
+        return self._code_splitter.split_text(unit)
 
     def _make_chunk(
         self,
@@ -147,7 +158,7 @@ class CodeChunker(BaseChunker):
             if len(unit) <= self.chunk_size:
                 pieces = [unit]
             else:
-                pieces = self._code_splitter.split_text(unit)
+                pieces = self._sub_split(unit)
             for j, piece in enumerate(pieces):
                 if not piece.strip():
                     continue
@@ -387,6 +398,112 @@ class PythonChunker(CodeChunker):
         flush()
         return [unit for unit in units if unit]
 
+    def _pack_statements(self, unit: str, target: ast.stmt) -> list[str]:
+        """Greedily pack a function into chunk_size-bounded pieces.
+
+        The definition header is kept as the first segment, so the signature
+        and its docstring travel with the code they document and no source
+        line is dropped. Avoids the mid-statement fragments a string-based
+        splitter would produce.
+        """
+        body = getattr(target, "body", [])
+        if not body:
+            return []
+
+        lines = unit.splitlines(keepends=True)
+        segments: list[str] = []
+        consumed = self._unit_start(target, lines)
+        header_emitted = False
+        for stmt in body:
+            start = self._unit_start(stmt, lines)
+            end = getattr(stmt, "end_lineno", None) or stmt.lineno
+            if not header_emitted and start > consumed:
+                segments.append("".join(lines[consumed:start]))
+                header_emitted = True
+            segments.append("".join(lines[start:end]))
+            consumed = max(consumed, end)
+        if not header_emitted and consumed < len(lines):
+            segments.append("".join(lines[consumed:]))
+
+        pieces: list[str] = []
+        current: list[str] = []
+        current_len = 0
+        for segment in segments:
+            if current and current_len + len(segment) > self.chunk_size:
+                pieces.append("".join(current))
+                current = []
+                current_len = 0
+            current.append(segment)
+            current_len += len(segment)
+        if current:
+            pieces.append("".join(current))
+        return [piece.strip() for piece in pieces if piece.strip()]
+
+    def _split_nested(self, unit: str) -> list[str]:
+        """Slice an oversized definition unit along its inner boundaries.
+
+        Classes are split by member (keeping docstrings and dataclass fields
+        with the header); functions are packed by statement. Returns an empty
+        list when there is nothing useful to split on.
+        """
+        tree = self._parse(unit)
+        if tree is None or len(tree.body) != 1:
+            return []
+        target = tree.body[0]
+        if isinstance(target, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return self._pack_statements(unit, target)
+        if not isinstance(target, ast.ClassDef):
+            return []
+        body = getattr(target, "body", [])
+        if len(body) < 2:
+            return []
+        if not any(
+            isinstance(stmt, self._DEFINITION_NODES) for stmt in body
+        ):
+            # fields/constants only (e.g. a dataclass): pack them like a
+            # function body so the header stays attached
+            return self._pack_statements(unit, target)
+
+        lines = unit.splitlines(keepends=True)
+        pieces: list[str] = []
+        pending: list[str] = []
+        consumed = self._unit_start(target, lines)
+
+        def flush() -> None:
+            text = "".join(pending).strip()
+            if text:
+                pieces.append(text)
+            pending.clear()
+
+        for stmt in body:
+            start = self._unit_start(stmt, lines)
+            end = getattr(stmt, "end_lineno", None) or stmt.lineno
+            if start > consumed:
+                pending.extend(lines[consumed:start])
+            segment = "".join(lines[start:end])
+            if isinstance(stmt, self._DEFINITION_NODES):
+                flush()
+                pieces.append(segment.strip())
+            else:
+                pending.append(segment)
+            consumed = max(consumed, end)
+
+        pending.extend(lines[consumed:])
+        flush()
+        return [piece for piece in pieces if piece]
+
+    def _sub_split(self, unit: str, depth: int = 0) -> list[str]:
+        if len(unit) <= self.chunk_size:
+            return [unit]
+        if depth < _MAX_NESTED_SPLIT_DEPTH:
+            nested = self._split_nested(unit)
+            if len(nested) > 1:
+                pieces: list[str] = []
+                for piece in nested:
+                    pieces.extend(self._sub_split(piece, depth + 1))
+                return pieces
+        return self._code_splitter.split_text(unit)
+
     def chunk(self, file_path: str, doc_type: DocType) -> list[DocumentChunk]:
         if self.should_exclude(file_path):
             return []
@@ -443,6 +560,7 @@ class JavaScriptChunker(CodeChunker):
         "\nconst ",
         "\nlet ",
         "\nvar ",
+        "\n    ",
         "\n\n",
         "\n",
         ".",
