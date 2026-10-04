@@ -5,9 +5,11 @@ from dataclasses import asdict
 
 from src.ingestion.chunkers import (
     BaseChunker,
+    JavaScriptChunker,
     MarkdownChunker,
     PDFChunker,
     PHPChunker,
+    PythonChunker,
 )
 from src.models import DocType, DocumentChunk
 
@@ -21,6 +23,8 @@ DOC_TYPE_MAP: dict[str, DocType] = {
 
 EXTENSION_MAP: dict[str, type[BaseChunker]] = {
     ".php": PHPChunker,
+    ".py": PythonChunker,
+    ".js": JavaScriptChunker,
     ".md": MarkdownChunker,
     ".pdf": PDFChunker,
 }

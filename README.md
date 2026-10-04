@@ -1,6 +1,6 @@
 # Local Multi-Layer RAG System
 
-RAG system local para documentação de usuário, código PHP legado e tickets de suporte. Embeddings com `bge-m3`, busca híbrida (BM25 + vetorial) e inferência via Ollama.
+RAG system local para documentação de usuário, código PHP/Python/JavaScript e tickets de suporte. Embeddings com `bge-m3`, busca híbrida (BM25 + vetorial) e inferência via Ollama.
 
 ## Requisitos
 
@@ -37,9 +37,17 @@ mkdir data\raw\user data\raw\tech data\raw\support data\processed data\vector_db
 ```
 data/raw/
 ├── user/       # PDFs e .md de documentação do usuário
-├── tech/       # Código PHP e wikis técnicas (.md)
+├── tech/       # Código PHP/Python/JS e wikis técnicas (.md)
 └── support/    # Tickets de suporte (.pdf,.md)
 ```
+
+Formatos suportados: `.md`, `.pdf`, `.php`, `.py`, `.js`.
+
+O chunking de código usa limites por linguagem — PHP por blocos `<?php`, Python pela
+AST (`def`/`class`) e JavaScript por separadores de declaração. Arquivos de terceiros
+e artefatos de build são ignorados: `/vendor`, `/node_modules`, `/.venv`, `/venv`,
+`/__pycache__`, `/site-packages`, `/dist`, `/build`, `/.next`, `/coverage`,
+`*.min.js`, `*.bundle.js` e `*.pack.js`.
 
 ### 2. Ingestão
 

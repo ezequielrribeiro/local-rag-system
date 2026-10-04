@@ -1,6 +1,19 @@
 import re
 
-TECH_KEYWORDS = ["código", "função", "banco", "bug", "php"]
+TECH_KEYWORDS = [
+    "código",
+    "função",
+    "banco",
+    "bug",
+    "php",
+    "python",
+    "javascript",
+    "js",
+    "async",
+    "await",
+    "npm",
+    "pip",
+]
 USER_KEYWORDS = ["como usar", "manual", "passo a passo", "login", "tutorial", "ajuda"]
 
 

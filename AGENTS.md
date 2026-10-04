@@ -58,7 +58,8 @@ REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [q
 ## Architecture Constraints
 - **Local-only** — no cloud APIs for embeddings or LLM inference. Use Ollama for local LLM.
 - **Hybrid search** — BM25 + vector embeddings (e.g., `bge-m3` or `nomic-embed-text`).
-- **Vendor exclusion** — `/vendor` and `/node_modules` paths must be excluded during PHP ingestion.
+- **Vendor exclusion** — `/vendor`, `/node_modules`, `/.venv`, `/venv`, `/__pycache__`, `/site-packages`, `/dist`, `/build`, `/.next`, `/coverage` paths and `*.min.js` / `*.bundle.js` / `*.pack.js` artifacts must be excluded during ingestion.
+- **Code chunking** — PHP: `<?php` blocks + recursive split. Python: stdlib `ast` for `def`/`class` boundaries (regex fallback when the file does not parse). JavaScript: recursive split on declaration separators + regex symbol detection.
 - **Domain routing** — keyword-based `doc_type` filtering per spec §4 QueryRouter rules.
 - **Grounded generation** — LLM must refuse to answer if no relevant context found (Portuguese: `"Informação não encontrada na documentação técnica fornecida."`).
 
@@ -70,18 +71,18 @@ REPL commands: `/help`, `/clear`, `/model [name]`, `/doc-type [mode]`, `/clip [q
   "metadata": {
     "source": str, "filename": str,
     "doc_type": "user"|"tech"|"support",
-    "format": "pdf"|"markdown"|"php_code",
+    "format": "pdf"|"markdown"|"php_code"|"python_code"|"javascript_code",
     "chunk_index": int,
     "page_number": int | null,       # PDF only
     "headers": dict | null,          # Markdown only
-    "detected_classes": list[str],   # PHP only
-    "detected_functions": list[str], # PHP only
+    "detected_classes": list[str],   # Code files only
+    "detected_functions": list[str], # Code files only
   }
 }
 ```
 
 ## Testing (BDD Scenarios from Spec)
 Run single test: `pytest tests/test_<name>.py -v`
-1. **test_chunking** — PHP vendor exclusion, markdown heading splitting
-2. **test_retrieval** — hybrid search, metadata filtering, hallucination prevention
+1. **test_chunking** — PHP vendor exclusion, markdown heading splitting, Python AST chunking, JavaScript symbol detection
+2. **test_retrieval** — hybrid search, metadata filtering, hallucination prevention, query routing for php/python/javascript
 3. **test_api** — health, doc_type routing, serialization, no-index 503

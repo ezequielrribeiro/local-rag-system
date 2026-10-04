@@ -17,7 +17,7 @@ execution_environment: Local (Air-Gapped / Privacy-First)
 Design and implement a fully local, privacy-compliant Retrieval-Augmented Generation (RAG) system tailored for individual developer use. The system aggregates, chunks, indexes, and queries three distinct domain knowledge layers:
 
 1. **User Documentation:** End-user manuals (PDFs) and FAQs (Markdown).
-2. **Technical Documentation:** Legacy PHP source code and Wiki documentation (Markdown).
+2. **Technical Documentation:** Legacy PHP, Python, and JavaScript source code plus Wiki documentation (Markdown).
 3. **Support Documentation:** Customer support tickets (PDFs) and issue resolution write-ups (Markdown).
 
 The architecture enforces strict metadata tagging, hybrid search (Lexical + Vector), and prompt isolation per knowledge domain.
@@ -28,9 +28,9 @@ The architecture enforces strict metadata tagging, hybrid search (Lexical + Vect
 
 ### 2.1 Functional Requirements
 
-* **[REQ-F01] Multi-Source Ingestion Engine:** The system MUST parse `.md`, `.pdf`, and `.php` files from structured directories without cross-contaminating document contexts.
+* **[REQ-F01] Multi-Source Ingestion Engine:** The system MUST parse `.md`, `.pdf`, `.php`, `.py`, and `.js` files from structured directories without cross-contaminating document contexts.
 * **[REQ-F02] Domain-Aware Metadata Assignment:** Every generated chunk MUST include mandatory metadata keys: `source_path`, `filename`, `doc_type` (`user` | `tech` | `support`), `format`, and `timestamp`.
-* **[REQ-F03] Specialized Language Chunking:** PHP source code MUST be split using language-aware boundaries (classes, functions, methods) while automatically excluding third-party vendor directories (`/vendor`, `/node_modules`).
+* **[REQ-F03] Specialized Language Chunking:** PHP, Python, and JavaScript source code MUST be split using language-aware boundaries (classes, functions, methods). Python boundaries MUST be derived from the standard-library `ast` module, falling back to regex detection when a file does not parse. Third-party and build-artifact directories MUST be excluded: `/vendor`, `/node_modules`, `/.venv`, `/venv`, `/__pycache__`, `/site-packages`, `/dist`, `/build`, `/.next`, `/coverage`, plus minified/bundled artifacts (`*.min.js`, `*.bundle.js`, `*.pack.js`).
 * **[REQ-F04] Structural Markdown Chunking:** Markdown files MUST be split along heading hierarchies (`#`, `##`, `###`) to preserve context.
 * **[REQ-F05] Hybrid Retrieval Mechanism:** The retrieval system MUST perform dense vector search (embeddings) combined with sparse lexical search (BM25) over the vector index.
 * **[REQ-F06] Domain Query Routing:** The query handler MUST route or filter searches based on user intent (e.g., technical code questions filter for `doc_type: ["tech", "support"]`).
@@ -52,7 +52,7 @@ The architecture enforces strict metadata tagging, hybrid search (Lexical + Vect
 data/
 └── raw/
     ├── user/     # [doc_type: user] PDFs, FAQ .md files
-    ├── tech/     # [doc_type: tech] System Wiki .md, PHP source code
+    ├── tech/     # [doc_type: tech] System Wiki .md, PHP/Python/JS source code
     └── support/  # [doc_type: support] Ticket .pdf files, solution .md files
 ```
 
@@ -66,13 +66,13 @@ interface DocumentChunk {
     source: string;          // Absolute or relative file path
     filename: string;        // E.g., "Authentication.php"
     doc_type: "user" | "tech" | "support";
-    format: "pdf" | "markdown" | "php_code";
+    format: "pdf" | "markdown" | "php_code" | "python_code" | "javascript_code";
     chunk_index: number;
     // Format-specific metadata
     page_number?: number;             // For PDF files
     headers?: Record<string, string>; // For Markdown (e.g., {"Header 1": "Overview"})
-    detected_classes?: string[];     // For PHP files
-    detected_functions?: string[];   // For PHP files
+    detected_classes?: string[];     // For code files (php_code, python_code, javascript_code)
+    detected_functions?: string[];   // For code files (php_code, python_code, javascript_code)
   };
 }
 ```
@@ -123,8 +123,8 @@ interface DocumentChunk {
 ### System Prompt: Technical & Developer Context (`doc_type: tech | support`)
 
 ```text
-You are an expert Lead Software Engineer specializing in legacy PHP web applications. 
-Your primary task is to help a developer inspect, debug, and understand the legacy codebase and system architecture.
+You are an expert Lead Software Engineer specializing in legacy PHP, Python, and JavaScript codebases. 
+Your primary task is to help a developer inspect, debug, and understand the codebase and system architecture.
 
 CRITICAL RULES:
 1. Base your answer EXCLUSIVELY on the provided code chunks and technical documentation below.
@@ -175,6 +175,33 @@ Feature: Grounded Answer Generation
     When the user asks "Como funciona o checkout com Pix no sistema?"
     And retrieval returns 0 relevant chunks above threshold
     Then the RAGGenerator response MUST contain "Informação não encontrada na documentação"
+```
+
+### Scenario 4: Python Chunking uses AST boundaries and excludes environments
+```gherkin
+Feature: Specialized Python Chunking
+  Scenario: Ingesting a Python codebase with virtualenv artifacts
+    Given a directory "data/raw/tech/.venv/lib" containing installed Python packages
+    And a file "data/raw/tech/services/auth.py" containing a class with methods
+    When the IngestionPipeline processes "data/raw/tech"
+    Then no chunks should have "source" paths containing "/.venv/"
+    And the generated chunks for "auth.py" must contain metadata format "python_code"
+    And the chunk boundaries MUST align with the module-level "def" and "class" statements
+    And "detected_classes" MUST list the classes found in the file
+```
+
+### Scenario 5: JavaScript Chunking detects declarations and excludes bundles
+```gherkin
+Feature: Specialized JavaScript Chunking
+  Scenario: Ingesting a JavaScript codebase with build artifacts
+    Given a directory "data/raw/tech/node_modules/pkg" containing third-party JavaScript
+    And a file "data/raw/tech/dist/app.bundle.js" containing a minified bundle
+    And a file "data/raw/tech/src/auth.js" containing a class, exported functions, and arrow functions
+    When the IngestionPipeline processes "data/raw/tech"
+    Then no chunks should have "source" paths containing "/node_modules/"
+    And no chunks should originate from "app.bundle.js"
+    And the generated chunks for "auth.js" must contain metadata format "javascript_code"
+    And "detected_functions" MUST include declared, assigned, and class method names
 ```
 
 ---

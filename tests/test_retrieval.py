@@ -23,6 +23,28 @@ def test_query_router_mixed_domain():
     assert "doc_type" in filter_meta
 
 
+def test_query_router_python_routes_to_tech():
+    for query in [
+        "Como importar um módulo python?",
+        "Erro de sintaxe no script python",
+        "O que significa async await nesse código?",
+    ]:
+        filter_meta = route_query(query)
+        assert "tech" in filter_meta.get("doc_type", []), query
+        assert "user" not in filter_meta["doc_type"], query
+
+
+def test_query_router_javascript_routes_to_tech():
+    for query in [
+        "Bug no javascript do node_modules",
+        "Como estruturar uma função javascript",
+        "npm install falhou, o que faço?",
+    ]:
+        filter_meta = route_query(query)
+        assert "tech" in filter_meta.get("doc_type", []), query
+        assert "user" not in filter_meta["doc_type"], query
+
+
 def test_hallucination_prevention_empty_context():
     client = LLMClient()
     result = client.generate(

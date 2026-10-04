@@ -14,6 +14,8 @@ class FileFormat(str, Enum):
     PDF = "pdf"
     MARKDOWN = "markdown"
     PHP_CODE = "php_code"
+    PYTHON_CODE = "python_code"
+    JAVASCRIPT_CODE = "javascript_code"
 
 
 @dataclass
