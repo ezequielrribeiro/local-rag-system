@@ -1,5 +1,7 @@
 import argparse
+import json
 import logging
+import os
 import sys
 
 import yaml
@@ -17,27 +19,98 @@ def load_config(path: str = "config.yaml") -> dict:
         return yaml.safe_load(f)
 
 
-def cmd_ingest(config: dict) -> None:
-    from src.ingestion.pipeline import run_ingestion
+def cmd_ingest(config: dict, full: bool = False) -> None:
+    from src.ingestion import incremental
+    from src.ingestion.pipeline import (
+        run_ingestion,
+        run_ingestion_for_files,
+        serialize_chunks,
+    )
     from src.retrieval.vector_store import HybridVectorStore
 
     raw_dir = config["paths"]["raw_dir"]
     processed_dir = config["paths"]["processed_dir"]
     vector_db_dir = config["paths"]["vector_db_dir"]
     emb_cfg = config["embedding"]
+    ingestion_cfg = config.get("ingestion") or {}
+    chunk_size = ingestion_cfg.get("chunk_size", 512)
+    chunk_overlap = ingestion_cfg.get("chunk_overlap", 64)
+    table_max_size = ingestion_cfg.get("table_max_size", 4000)
 
-    chunks = run_ingestion(raw_dir=raw_dir, processed_dir=processed_dir)
-    if not chunks:
-        logger.warning("No chunks generated from ingestion.")
+    index_exists = os.path.isfile(os.path.join(vector_db_dir, "chunks.pkl"))
+
+    if full or not index_exists:
+        chunks = run_ingestion(
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            table_max_size=table_max_size,
+        )
+        if not chunks:
+            logger.warning("No chunks generated from ingestion.")
+            return
+
+        store = HybridVectorStore(
+            embedding_model_name=emb_cfg["model"],
+            device=emb_cfg.get("device", "cpu"),
+        )
+        store.add_documents(chunks)
+        store.save(vector_db_dir)
+        incremental.save_manifest(processed_dir, incremental.current_hashes(raw_dir))
+        logger.info("Full ingestion and indexing complete.")
+        return
+
+    changed, removed, current = incremental.plan(raw_dir, processed_dir)
+    if not changed and not removed:
+        logger.info("Nenhuma mudanca detectada; ingestao incremental ignorada.")
         return
 
     store = HybridVectorStore(
         embedding_model_name=emb_cfg["model"],
         device=emb_cfg.get("device", "cpu"),
     )
+
+    if not store.load(vector_db_dir):
+        logger.warning(
+            "Indice existente nao pode ser carregado; refazendo ingestao completa."
+        )
+        chunks = run_ingestion(
+            raw_dir=raw_dir,
+            processed_dir=processed_dir,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            table_max_size=table_max_size,
+        )
+        if not chunks:
+            return
+        store.add_documents(chunks)
+        store.save(vector_db_dir)
+        incremental.save_manifest(processed_dir, incremental.current_hashes(raw_dir))
+        return
+
+    store.remove_sources(set(changed) | set(removed))
+    chunks = run_ingestion_for_files(
+        changed,
+        raw_dir=raw_dir,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        table_max_size=table_max_size,
+    )
     store.add_documents(chunks)
     store.save(vector_db_dir)
-    logger.info("Ingestion and indexing complete.")
+
+    os.makedirs(processed_dir, exist_ok=True)
+    with open(os.path.join(processed_dir, "chunks.json"), "w", encoding="utf-8") as f:
+        json.dump(serialize_chunks(store.chunks), f, ensure_ascii=False, indent=2)
+
+    incremental.save_manifest(processed_dir, current)
+    logger.info(
+        "Incremental ingestion complete: %d changed, %d removed, %d chunks total.",
+        len(changed),
+        len(removed),
+        len(store.chunks),
+    )
 
 
 def cmd_query(
@@ -159,6 +232,11 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ingest_parser = subparsers.add_parser("ingest", help="Run ingestion pipeline")
+    ingest_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Refaz a ingestão completa (ignora o manifesto incremental)",
+    )
     ingest_parser.set_defaults(func="ingest")
 
     query_parser = subparsers.add_parser("query", help="Query the RAG system")
@@ -204,7 +282,7 @@ def main() -> None:
     config = load_config(args.config)
 
     if args.func == "ingest":
-        cmd_ingest(config)
+        cmd_ingest(config, full=args.full)
     elif args.func == "query":
         cmd_query(config, args.query_text, args.doc_type, args.paste, args.clipboard)
     elif args.func == "chat":

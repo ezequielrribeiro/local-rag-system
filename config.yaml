@@ -13,6 +13,11 @@ retrieval:
   similarity_threshold: 0.3
   rerank_method: reciprocal_rank_fusion
 
+ingestion:
+  chunk_size: 512
+  chunk_overlap: 64
+  table_max_size: 4000
+
 server:
   host: 127.0.0.1
   port: 8000

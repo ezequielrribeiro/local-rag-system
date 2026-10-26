@@ -59,6 +59,7 @@ def create_app(config: dict | None = None) -> FastAPI:
                 query=payload.query,
                 doc_type=payload.doc_type,
                 top_k=payload.top_k,
+                source_kind=payload.source_kind,
             )
         except IndexNotLoadedError as exc:
             raise HTTPException(status_code=503, detail=str(exc))

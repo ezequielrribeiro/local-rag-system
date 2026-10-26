@@ -55,6 +55,36 @@ class HybridVectorStore:
             "Vector store now has %d documents", len(self.chunks)
         )
 
+    def remove_sources(self, sources: set[str]) -> int:
+        """Remove os chunks cujo `source` está no conjunto (CHG-R04)."""
+        if not sources or not self.chunks:
+            return 0
+
+        keep = [
+            index
+            for index, chunk in enumerate(self.chunks)
+            if chunk.metadata.source not in sources
+        ]
+        removed = len(self.chunks) - len(keep)
+        if removed == 0:
+            return 0
+
+        self.chunks = [self.chunks[index] for index in keep]
+        if self.embeddings is not None:
+            self.embeddings = self.embeddings[keep]
+        self._rebuild_bm25()
+
+        logger.info("Removed %d chunks from %d source(s)", removed, len(sources))
+        return removed
+
+    def _rebuild_bm25(self) -> None:
+        self._tokenized_corpus = [
+            chunk.page_content.lower().split() for chunk in self.chunks
+        ]
+        self.bm25 = (
+            BM25Okapi(self._tokenized_corpus) if self._tokenized_corpus else None
+        )
+
     def hybrid_search(
         self,
         query: str,
@@ -70,33 +100,44 @@ class HybridVectorStore:
         tokenized_query = query.lower().split()
         bm25_scores = np.array(self.bm25.get_scores(tokenized_query))
 
-        dense_ranks = np.argsort(-dense_scores)
-        bm25_ranks = np.argsort(-bm25_scores)
-
         n = len(self.chunks)
+
+        # O filtro de metadados é aplicado ANTES do corte de top_k, para que a
+        # busca devolva até top_k resultados elegíveis (CHG-R01).
+        eligible: list[int] | None = None
+        if filter_metadata:
+            eligible = []
+            for idx, chunk in enumerate(self.chunks):
+                match = all(
+                    getattr(chunk.metadata, key, None) in value
+                    if isinstance(value, list)
+                    else getattr(chunk.metadata, key, None) == value
+                    for key, value in filter_metadata.items()
+                )
+                if match:
+                    eligible.append(idx)
+
+            if not eligible:
+                return []
+
+        dense_ranks = [int(i) for i in np.argsort(-dense_scores)]
+        bm25_ranks = [int(i) for i in np.argsort(-bm25_scores)]
+
+        if eligible is not None:
+            eligible_set = set(eligible)
+            dense_ranks = [i for i in dense_ranks if i in eligible_set]
+            bm25_ranks = [i for i in bm25_ranks if i in eligible_set]
+
         rrf_scores = np.zeros(n)
         for rank, idx in enumerate(dense_ranks):
             rrf_scores[idx] += alpha / (60 + rank + 1)
         for rank, idx in enumerate(bm25_ranks):
             rrf_scores[idx] += (1 - alpha) / (60 + rank + 1)
 
-        top_indices = np.argsort(-rrf_scores)[:top_k]
+        candidates = eligible if eligible is not None else list(range(n))
+        top_indices = sorted(candidates, key=lambda i: -rrf_scores[i])[:top_k]
 
-        results = []
-        for idx in top_indices:
-            chunk = self.chunks[idx]
-            if filter_metadata:
-                match = all(
-                    getattr(chunk.metadata, k, None) == v
-                    if not isinstance(v, list)
-                    else getattr(chunk.metadata, k, None) in v
-                    for k, v in filter_metadata.items()
-                )
-                if not match:
-                    continue
-            results.append(chunk)
-
-        return results
+        return [self.chunks[i] for i in top_indices]
 
     def save(self, db_dir: str) -> None:
         os.makedirs(db_dir, exist_ok=True)

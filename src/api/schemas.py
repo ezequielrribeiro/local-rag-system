@@ -9,6 +9,7 @@ class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     doc_type: DocTypeFilter = "auto"
     top_k: Optional[int] = None
+    source_kind: Optional[str] = None
 
 
 class ChunkMetadataOut(BaseModel):
@@ -21,6 +22,7 @@ class ChunkMetadataOut(BaseModel):
     headers: Optional[dict[str, str]] = None
     detected_classes: Optional[list[str]] = None
     detected_functions: Optional[list[str]] = None
+    source_kind: Optional[str] = None
 
 
 class SearchResult(BaseModel):

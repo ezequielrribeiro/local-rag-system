@@ -29,6 +29,7 @@ class ChunkMetadata:
     headers: Optional[dict[str, str]] = None
     detected_classes: Optional[list[str]] = None
     detected_functions: Optional[list[str]] = None
+    source_kind: Optional[str] = None
 
 
 @dataclass

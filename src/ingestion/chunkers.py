@@ -623,11 +623,17 @@ class MarkdownChunker(BaseChunker):
     _HEADER_DEPTH = {"#": 1, "##": 2, "###": 3}
     _LEVEL_MAP = {"Header 1": 1, "Header 2": 2, "Header 3": 3}
 
-    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 64):
+    def __init__(
+        self,
+        chunk_size: int = 512,
+        chunk_overlap: int = 64,
+        table_max_size: int = 4000,
+    ):
         self._splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
+        self._table_max_size = table_max_size
 
     @staticmethod
     def _parse_sections(text: str) -> list[tuple[dict[str, str], str]]:
@@ -663,6 +669,28 @@ class MarkdownChunker(BaseChunker):
     def chunk(self, file_path: str, doc_type: DocType) -> list[DocumentChunk]:
         with open(file_path, encoding="utf-8", errors="replace") as f:
             text = f.read()
+
+        stripped = text.lstrip()
+
+        # Mantém cada documento "# Tabela:" como um chunk inteiro quando couber
+        # (CHG-R03), evitando quebrar a definição da tabela no meio.
+        if stripped.startswith("# Tabela:") and len(text) <= self._table_max_size:
+            title = stripped.splitlines()[0][len("# Tabela:"):].strip()
+            metadata = ChunkMetadata(
+                source=file_path,
+                filename=os.path.basename(file_path),
+                doc_type=doc_type,
+                format=FileFormat.MARKDOWN,
+                chunk_index=0,
+                headers={"Header 1": f"Tabela: {title}"},
+            )
+            return [
+                DocumentChunk(
+                    chunk_id=DocumentChunk.generate_id(file_path, 0),
+                    page_content=stripped.strip(),
+                    metadata=metadata,
+                )
+            ]
 
         sections = self._parse_sections(text)
         chunks = []

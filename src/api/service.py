@@ -68,17 +68,25 @@ class RAGSearchService:
         db_dir = config["paths"]["vector_db_dir"]
         return os.path.isfile(os.path.join(db_dir, "chunks.pkl"))
 
-    def resolve_filter(self, query: str, doc_type: str) -> dict:
+    def resolve_filter(self, query: str, doc_type: str, source_kind: str | None = None) -> dict:
         if doc_type == "auto" or doc_type is None:
-            return route_query(query)
-        return {"doc_type": [doc_type]}
+            filter_metadata = route_query(query)
+        else:
+            filter_metadata = {"doc_type": [doc_type]}
+        if source_kind:
+            filter_metadata["source_kind"] = source_kind
+        return filter_metadata
 
     def search(
-        self, query: str, doc_type: str = "auto", top_k: int | None = None
+        self,
+        query: str,
+        doc_type: str = "auto",
+        top_k: int | None = None,
+        source_kind: str | None = None,
     ) -> tuple[list[DocumentChunk], str, list[str]]:
         store = self.store
         k = top_k if top_k is not None else self.top_k
-        filter_metadata = self.resolve_filter(query, doc_type)
+        filter_metadata = self.resolve_filter(query, doc_type, source_kind)
         routed = filter_metadata.get("doc_type")
 
         results = store.hybrid_search(
